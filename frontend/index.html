@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentimo — Market Intelligence Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        bg: { primary: '#0a0e17', secondary: '#111827', card: '#1a1f2e', border: '#2a3044' },
+                        accent: { green: '#00ff88', red: '#ff3366', blue: '#3b82f6', purple: '#8b5cf6', amber: '#f59e0b', cyan: '#06b6d4' },
+                    },
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Inter', 'sans-serif'] },
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: #0a0e17; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        .glow-green { box-shadow: 0 0 20px rgba(0,255,136,0.15); }
+        .glow-red { box-shadow: 0 0 20px rgba(255,51,102,0.15); }
+        .card { background: #1a1f2e; border: 1px solid #2a3044; border-radius: 12px; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+        .gauge-ring { transition: stroke-dashoffset 1s ease-in-out; }
+        .bubble { border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                  text-align: center; font-size: 11px; font-weight: 600; cursor: pointer;
+                  transition: transform 0.3s; position: absolute; }
+        .bubble:hover { transform: scale(1.15); z-index: 10; }
+        .anomaly-badge { animation: slideIn 0.5s ease-out; }
+        @keyframes slideIn { from{opacity:0;transform:translateX(-20px)} to{opacity:1;transform:translateX(0)} }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #2a3044; border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    <header class="border-b border-bg-border px-6 py-4">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-accent-green/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-5 h-5 text-accent-green" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 2L3 7v6l7 5 7-5V7l-7-5zM10 4.5L14.5 7.5 10 10.5 5.5 7.5 10 4.5z"/>
+                    </svg>
+                </div>
+                <h1 class="text-xl font-bold font-mono tracking-tight">CRYPTO<span class="text-accent-green">SENTINEL</span></h1>
+                <span class="text-xs text-gray-500 ml-2 hidden sm:inline">Market Intelligence Platform</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 text-xs text-gray-400">
+                    <span id="status-dot" class="w-2 h-2 rounded-full bg-accent-green pulse"></span>
+                    <span id="status-text">Live</span>
+                </div>
+                <select id="time-range" class="bg-bg-card border border-bg-border rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-accent-green">
+                    <option value="24">24 Hours</option>
+                    <option value="48">48 Hours</option>
+                    <option value="72" selected>72 Hours</option>
+                </select>
+                <button onclick="refreshAll()" class="bg-accent-green/10 text-accent-green border border-accent-green/30 rounded-lg px-3 py-1.5 text-sm hover:bg-accent-green/20 transition">
+                    ↻ Refresh
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <!-- Row 1: Fear & Greed + Distribution + Key Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Fear & Greed Gauge -->
+            <div class="card p-6 flex flex-col items-center">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Fear & Greed Index</h2>
+                <div class="relative w-48 h-48">
+                    <svg viewBox="0 0 200 200" class="w-full h-full">
+                        <circle cx="100" cy="100" r="85" fill="none" stroke="#2a3044" stroke-width="12"/>
+                        <circle id="gauge-ring" cx="100" cy="100" r="85" fill="none"
+                                stroke="#00ff88" stroke-width="12" stroke-linecap="round"
+                                stroke-dasharray="534" stroke-dashoffset="534"
+                                transform="rotate(-90 100 100)" class="gauge-ring"/>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span id="fg-score" class="text-5xl font-bold font-mono text-accent-green">--</span>
+                        <span id="fg-label" class="text-sm text-gray-400 mt-1">Loading...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sentiment Distribution -->
+            <div class="card p-6">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Sentiment Distribution</h2>
+                <canvas id="dist-chart" height="180"></canvas>
+                <div class="flex justify-between mt-4 text-xs">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-accent-green"></span> Bullish: <strong id="dist-bull">-</strong></span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-gray-500"></span> Neutral: <strong id="dist-neut">-</strong></span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-accent-red"></span> Bearish: <strong id="dist-bear">-</strong></span>
+                </div>
+            </div>
+
+            <!-- Key Stats -->
+            <div class="card p-6 space-y-4">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Metrics</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-bg-secondary rounded-lg p-3">
+                        <div class="text-xs text-gray-500">Total Posts</div>
+                        <div id="stat-posts" class="text-2xl font-bold font-mono text-white">--</div>
+                    </div>
+                    <div class="bg-bg-secondary rounded-lg p-3">
+                        <div class="text-xs text-gray-500">Avg Sentiment</div>
+                        <div id="stat-avg" class="text-2xl font-bold font-mono">--</div>
+                    </div>
+                    <div class="bg-bg-secondary rounded-lg p-3">
+                        <div class="text-xs text-gray-500">Anomalies</div>
+                        <div id="stat-anomalies" class="text-2xl font-bold font-mono text-accent-amber">--</div>
+                    </div>
+                    <div class="bg-bg-secondary rounded-lg p-3">
+                        <div class="text-xs text-gray-500">Narratives</div>
+                        <div id="stat-narratives" class="text-2xl font-bold font-mono text-accent-purple">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: Sentiment Timeline -->
+        <div class="card p-6">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Sentiment Timeline</h2>
+            <canvas id="timeline-chart" height="80"></canvas>
+        </div>
+
+        <!-- Row 3: Entity Leaderboard + Narrative Radar -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Entity Leaderboard -->
+            <div class="card p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Entity Leaderboard</h2>
+                    <div class="flex gap-1">
+                        <button onclick="filterEntities('')" class="ent-filter px-2 py-1 text-xs rounded bg-accent-blue/20 text-accent-blue">All</button>
+                        <button onclick="filterEntities('coin')" class="ent-filter px-2 py-1 text-xs rounded bg-bg-secondary text-gray-400">Coins</button>
+                        <button onclick="filterEntities('person')" class="ent-filter px-2 py-1 text-xs rounded bg-bg-secondary text-gray-400">People</button>
+                        <button onclick="filterEntities('protocol')" class="ent-filter px-2 py-1 text-xs rounded bg-bg-secondary text-gray-400">Protocols</button>
+                    </div>
+                </div>
+                <div id="entity-list" class="space-y-2 max-h-80 overflow-y-auto"></div>
+            </div>
+
+            <!-- Narrative Radar -->
+            <div class="card p-6">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Narrative Radar</h2>
+                <div id="narrative-bubbles" class="relative w-full h-80 overflow-hidden"></div>
+            </div>
+        </div>
+
+        <!-- Row 4: Anomaly Alerts + Top Market Data -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Anomaly Alerts -->
+            <div class="card p-6">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
+                    <span class="text-accent-amber">⚡</span> Anomaly Alerts
+                </h2>
+                <div id="anomaly-list" class="space-y-3 max-h-80 overflow-y-auto"></div>
+            </div>
+
+            <!-- Market Overview -->
+            <div class="card p-6">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Market Overview</h2>
+                <div id="market-list" class="space-y-2 max-h-80 overflow-y-auto"></div>
+            </div>
+        </div>
+
+        <!-- Row 5: Sources -->
+        <div class="card p-6">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Top Sources</h2>
+            <div id="sources-list" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+        </div>
+    </main>
+
+    <footer class="border-t border-bg-border px-6 py-4 mt-8">
+        <div class="max-w-7xl mx-auto flex items-center justify-between text-xs text-gray-500">
+            <span>Sentimo v1.0 — Open Source Intelligence</span>
+            <a href="https://github.com" class="hover:text-accent-green transition">GitHub ↗</a>
+        </div>
+    </footer>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────
+const API_BASE = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+    ? `${window.location.origin}/api`
+    : '';  // For GitHub Pages, will use mock data
+
+let USE_MOCK = !API_BASE;
+let currentHours = 72;
+let allEntities = [];
+
+// ── Mock Data (for GitHub Pages static hosting) ──────────────────────
+const MOCK = {
+    sentiment: {
+        fear_greed: { score: 62, label: "Greed" },
+        distribution: { bullish: 135, neutral: 90, bearish: 75 },
+        total_posts: 300,
+        avg_compound: 0.0823,
+        timeline: (() => {
+            const t = [];
+            const now = Date.now();
+            for (let i = 72; i >= 0; i--) {
+                const d = new Date(now - i * 3600000);
+                t.push({
+                    time: d.toISOString().slice(0, 13),
+                    avg_sentiment: Math.sin(i/8)*0.3 + Math.random()*0.2 - 0.1,
+                    count: Math.floor(Math.random()*15)+2
+                });
+            }
+            return t;
+        })()
+    },
+    entities: [
+        {entity:"Bitcoin",type:"coin",mentions:89,avg_sentiment:0.32},
+        {entity:"Ethereum",type:"coin",mentions:72,avg_sentiment:0.15},
+        {entity:"Solana",type:"coin",mentions:58,avg_sentiment:0.45},
+        {entity:"XRP",type:"coin",mentions:41,avg_sentiment:0.28},
+        {entity:"Dogecoin",type:"coin",mentions:35,avg_sentiment:0.18},
+        {entity:"Cardano",type:"coin",mentions:28,avg_sentiment:-0.05},
+        {entity:"Chainlink",type:"coin",mentions:22,avg_sentiment:0.21},
+        {entity:"Polkadot",type:"coin",mentions:19,avg_sentiment:0.08},
+        {entity:"Avalanche",type:"coin",mentions:16,avg_sentiment:0.35},
+        {entity:"Polygon",type:"coin",mentions:14,avg_sentiment:0.12},
+        {entity:"Vitalik Buterin",type:"person",mentions:18,avg_sentiment:0.35},
+        {entity:"Elon Musk",type:"person",mentions:15,avg_sentiment:0.22},
+        {entity:"Gary Gensler",type:"person",mentions:12,avg_sentiment:-0.45},
+        {entity:"Michael Saylor",type:"person",mentions:10,avg_sentiment:0.55},
+        {entity:"CZ",type:"person",mentions:8,avg_sentiment:0.05},
+        {entity:"Uniswap",type:"protocol",mentions:14,avg_sentiment:0.25},
+        {entity:"Aave",type:"protocol",mentions:11,avg_sentiment:0.18},
+        {entity:"Lido",type:"protocol",mentions:9,avg_sentiment:0.3},
+    ],
+    narratives: [
+        {label:"Bitcoin ETF & Institutional",volume:45,avg_sentiment:0.42,keywords:["bitcoin","etf","blackrock","institutional"]},
+        {label:"Ethereum Layer 2 Scaling",volume:38,avg_sentiment:0.28,keywords:["ethereum","layer2","rollup","optimism"]},
+        {label:"Solana DeFi Summer",volume:32,avg_sentiment:0.51,keywords:["solana","defi","raydium","jupiter"]},
+        {label:"Meme Coin Mania",volume:28,avg_sentiment:0.15,keywords:["doge","shib","pepe","meme"]},
+        {label:"Regulation & Legal",volume:22,avg_sentiment:-0.35,keywords:["sec","regulation","lawsuit","compliance"]},
+        {label:"AI + Crypto Convergence",volume:18,avg_sentiment:0.38,keywords:["ai","gpu","compute","render"]},
+        {label:"DePIN Revolution",volume:12,avg_sentiment:0.29,keywords:["depin","helium","infrastructure"]},
+        {label:"Stablecoins",volume:10,avg_sentiment:0.05,keywords:["usdt","usdc","stablecoin"]},
+    ],
+    anomalies: [
+        {entity:"Bitcoin",metric:"volume_spike",z_score:3.2,description:"BTC mentions surged 340% in last 4 hours",detected_at:new Date(Date.now()-3600000).toISOString()},
+        {entity:"Solana",metric:"sentiment_shift",z_score:2.8,description:"SOL sentiment flipped bearish to strongly bullish",detected_at:new Date(Date.now()-7200000).toISOString()},
+        {entity:"Dogecoin",metric:"volume_spike",z_score:2.5,description:"DOGE discussion spiked after Elon Musk tweet",detected_at:new Date(Date.now()-14400000).toISOString()},
+        {entity:"Ethereum",metric:"sentiment_shift",z_score:2.1,description:"ETH sentiment dropped on gas fee concerns",detected_at:new Date(Date.now()-18000000).toISOString()},
+        {entity:"XRP",metric:"volume_spike",z_score:3.9,description:"XRP mentions exploded after SEC ruling news",detected_at:new Date(Date.now()-21600000).toISOString()},
+    ],
+    market: [
+        {coin_id:"bitcoin",symbol:"btc",name:"Bitcoin",price_usd:67234.5,market_cap:1320000000000,volume_24h:28000000000,price_change_24h:2.34},
+        {coin_id:"ethereum",symbol:"eth",name:"Ethereum",price_usd:3456.78,market_cap:415000000000,volume_24h:15000000000,price_change_24h:-0.89},
+        {coin_id:"solana",symbol:"sol",name:"Solana",price_usd:178.23,market_cap:79000000000,volume_24h:4200000000,price_change_24h:5.67},
+        {coin_id:"dogecoin",symbol:"doge",name:"Dogecoin",price_usd:0.165,market_cap:23500000000,volume_24h:1800000000,price_change_24h:1.23},
+        {coin_id:"cardano",symbol:"ada",name:"Cardano",price_usd:0.62,market_cap:22000000000,volume_24h:980000000,price_change_24h:-2.15},
+        {coin_id:"ripple",symbol:"xrp",name:"XRP",price_usd:0.58,market_cap:31500000000,volume_24h:1200000000,price_change_24h:8.42},
+        {coin_id:"polkadot",symbol:"dot",name:"Polkadot",price_usd:7.82,market_cap:10500000000,volume_24h:450000000,price_change_24h:-1.34},
+        {coin_id:"avalanche-2",symbol:"avax",name:"Avalanche",price_usd:38.45,market_cap:14200000000,volume_24h:620000000,price_change_24h:3.21},
+        {coin_id:"chainlink",symbol:"link",name:"Chainlink",price_usd:18.92,market_cap:11200000000,volume_24h:780000000,price_change_24h:1.87},
+        {coin_id:"polygon",symbol:"matic",name:"Polygon",price_usd:0.89,market_cap:8300000000,volume_24h:380000000,price_change_24h:-0.56},
+    ],
+    sources: [
+        {source:"reddit",name:"cryptocurrency",count:82},{source:"reddit",name:"bitcoin",count:65},
+        {source:"reddit",name:"altcoin",count:48},{source:"reddit",name:"memecoins",count:35},
+        {source:"news",name:"CoinDesk",count:28},{source:"news",name:"CoinTelegraph",count:24},
+        {source:"news",name:"Decrypt",count:18},{source:"news",name:"The Block",count:12},
+    ],
+};
+
+// ── Fetcher ───────────────────────────────────────────────────────────
+async function api(endpoint, params = {}) {
+    if (USE_MOCK) {
+        const key = endpoint.replace('/api/', '');
+        return MOCK[key] || [];
+    }
+    const url = new URL(`${API_BASE}/${endpoint}`);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(r.statusText);
+        return await r.json();
+    } catch (e) {
+        console.warn(`API ${endpoint} failed, using mock:`, e);
+        USE_MOCK = true;
+        return api(endpoint, params);
+    }
+}
+
+// ── Chart instances ───────────────────────────────────────────────────
+let distChart, timelineChart;
+
+function initCharts() {
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = '#2a3044';
+
+    distChart = new Chart(document.getElementById('dist-chart'), {
+        type: 'doughnut',
+        data: {
+            labels: ['Bullish', 'Neutral', 'Bearish'],
+            datasets: [{ data: [0,0,0], backgroundColor: ['#00ff88','#64748b','#ff3366'], borderWidth: 0 }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } }, cutout: '65%' }
+    });
+
+    timelineChart = new Chart(document.getElementById('timeline-chart'), {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                { label: 'Sentiment', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0,255,136,0.1)', fill: true, tension: 0.4, pointRadius: 0 },
+                { label: 'Zero Line', data: [], borderColor: '#ff336644', borderDash: [5,5], pointRadius: 0 },
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { intersect: false, mode: 'index' },
+            scales: {
+                x: { display: true, grid: { display: false }, ticks: { maxTicksLimit: 12, font: { size: 10 } } },
+                y: { min: -1, max: 1, grid: { color: '#2a304433' } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+// ── Render functions ──────────────────────────────────────────────────
+async function loadSentiment() {
+    const d = await api('sentiment', { hours: currentHours });
+    // Fear & Greed
+    const score = d.fear_greed.score;
+    document.getElementById('fg-score').textContent = score;
+    document.getElementById('fg-label').textContent = d.fear_greed.label;
+    const ring = document.getElementById('gauge-ring');
+    const offset = 534 - (534 * score / 100);
+    ring.style.strokeDashoffset = offset;
+    const color = score > 60 ? '#00ff88' : score > 40 ? '#f59e0b' : '#ff3366';
+    ring.style.stroke = color;
+    document.getElementById('fg-score').style.color = color;
+
+    // Distribution
+    const dist = d.distribution;
+    distChart.data.datasets[0].data = [dist.bullish, dist.neutral, dist.bearish];
+    distChart.update();
+    document.getElementById('dist-bull').textContent = dist.bullish;
+    document.getElementById('dist-neut').textContent = dist.neutral;
+    document.getElementById('dist-bear').textContent = dist.bearish;
+
+    // Stats
+    document.getElementById('stat-posts').textContent = d.total_posts;
+    const avgEl = document.getElementById('stat-avg');
+    avgEl.textContent = d.avg_compound > 0 ? `+${d.avg_compound.toFixed(3)}` : d.avg_compound.toFixed(3);
+    avgEl.className = `text-2xl font-bold font-mono ${d.avg_compound >= 0 ? 'text-accent-green' : 'text-accent-red'}`;
+
+    // Timeline
+    const labels = d.timeline.map(t => {
+        const dt = new Date(t.time + ':00:00Z');
+        return dt.toLocaleTimeString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    });
+    timelineChart.data.labels = labels;
+    timelineChart.data.datasets[0].data = d.timeline.map(t => t.avg_sentiment);
+    timelineChart.data.datasets[1].data = d.timeline.map(() => 0);
+    timelineChart.update();
+}
+
+async function loadEntities(type = '') {
+    const params = { hours: currentHours };
+    if (type) params.type = type;
+    allEntities = await api('entities', params);
+    renderEntities(allEntities);
+}
+
+function renderEntities(entities) {
+    const el = document.getElementById('entity-list');
+    const max = entities.length ? entities[0].mentions : 1;
+    el.innerHTML = entities.slice(0, 15).map((e, i) => {
+        const pct = (e.mentions / max * 100).toFixed(0);
+        const sColor = e.avg_sentiment >= 0.15 ? 'text-accent-green' : e.avg_sentiment <= -0.15 ? 'text-accent-red' : 'text-gray-400';
+        const typeColor = { coin: 'bg-accent-blue/20 text-accent-blue', person: 'bg-accent-purple/20 text-accent-purple',
+                           protocol: 'bg-accent-cyan/20 text-accent-cyan', exchange: 'bg-accent-amber/20 text-accent-amber' }[e.type] || 'bg-gray-700 text-gray-300';
+        return `
+            <div class="relative bg-bg-secondary rounded-lg p-3 overflow-hidden">
+                <div class="absolute inset-y-0 left-0 bg-accent-green/5 rounded-lg" style="width:${pct}%"></div>
+                <div class="relative flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs font-mono text-gray-500 w-5">#${i+1}</span>
+                        <span class="font-semibold text-sm">${e.entity}</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded ${typeColor}">${e.type}</span>
+                    </div>
+                    <div class="flex items-center gap-4 text-sm">
+                        <span class="${sColor} font-mono">${e.avg_sentiment >= 0 ? '+' : ''}${e.avg_sentiment.toFixed(2)}</span>
+                        <span class="font-bold font-mono text-white">${e.mentions}</span>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function filterEntities(type) {
+    document.querySelectorAll('.ent-filter').forEach(b => {
+        b.className = `ent-filter px-2 py-1 text-xs rounded ${b.textContent.toLowerCase().startsWith(type || 'all') ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-secondary text-gray-400'}`;
+    });
+    loadEntities(type);
+}
+
+async function loadNarratives() {
+    const narrs = await api('narratives', { hours: currentHours });
+    document.getElementById('stat-narratives').textContent = narrs.length;
+    const container = document.getElementById('narrative-bubbles');
+    container.innerHTML = '';
+    if (!narrs.length) return;
+
+    const maxVol = Math.max(...narrs.map(n => n.volume));
+    const colors = ['#3b82f6','#8b5cf6','#06b6d4','#00ff88','#f59e0b','#ff3366','#ec4899','#6366f1'];
+
+    // Position bubbles in a pleasing layout
+    const positions = [
+        [25,30],[60,25],[40,60],[75,55],[15,65],[55,80],[85,35],[30,85]
+    ];
+
+    narrs.slice(0, 8).forEach((n, i) => {
+        const size = Math.max(60, (n.volume / maxVol) * 140);
+        const [x, y] = positions[i] || [50, 50];
+        const color = colors[i % colors.length];
+        const sLabel = n.avg_sentiment >= 0.15 ? '↑' : n.avg_sentiment <= -0.15 ? '↓' : '→';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.style.cssText = `width:${size}px;height:${size}px;left:calc(${x}% - ${size/2}px);top:calc(${y}% - ${size/2}px);background:${color}22;border:2px solid ${color}88;color:${color};`;
+        bubble.innerHTML = `<div><div class="font-bold" style="font-size:${Math.max(9,size/10)}px">${n.label.split(' ').slice(0,2).join(' ')}</div><div style="font-size:9px;opacity:0.7">${n.volume} posts ${sLabel}</div></div>`;
+        bubble.title = `${n.label}\n${n.volume} posts | Sentiment: ${n.avg_sentiment.toFixed(2)}\nKeywords: ${n.keywords.join(', ')}`;
+        container.appendChild(bubble);
+    });
+}
+
+async function loadAnomalies() {
+    const anoms = await api('anomalies');
+    document.getElementById('stat-anomalies').textContent = anoms.length;
+    const el = document.getElementById('anomaly-list');
+    if (!anoms.length) {
+        el.innerHTML = '<div class="text-gray-500 text-sm text-center py-8">No anomalies detected</div>';
+        return;
+    }
+    el.innerHTML = anoms.map(a => {
+        const icon = a.metric === 'volume_spike' ? '📈' : '🔄';
+        const severity = Math.abs(a.z_score) > 3 ? 'border-accent-red/50' : 'border-accent-amber/50';
+        const ago = timeAgo(a.detected_at);
+        return `
+            <div class="anomaly-badge bg-bg-secondary rounded-lg p-3 border-l-4 ${severity}">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <span class="text-sm">${icon} <strong>${a.entity}</strong></span>
+                        <span class="text-xs px-1.5 py-0.5 ml-2 rounded bg-accent-amber/20 text-accent-amber">${a.metric.replace('_',' ')}</span>
+                        <p class="text-xs text-gray-400 mt-1">${a.description}</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs font-mono text-accent-amber">z=${Math.abs(a.z_score).toFixed(1)}</div>
+                        <div class="text-xs text-gray-500 mt-1">${ago}</div>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+async function loadMarket() {
+    const coins = await api('market');
+    const el = document.getElementById('market-list');
+    el.innerHTML = coins.map(c => {
+        const chg = c.price_change_24h;
+        const chgColor = chg >= 0 ? 'text-accent-green' : 'text-accent-red';
+        const chgIcon = chg >= 0 ? '▲' : '▼';
+        return `
+            <div class="flex items-center justify-between bg-bg-secondary rounded-lg p-3">
+                <div class="flex items-center gap-3">
+                    <span class="font-bold text-sm uppercase font-mono text-accent-blue">${c.symbol}</span>
+                    <span class="text-sm text-gray-300">${c.name}</span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="font-mono text-sm">$${formatNum(c.price_usd)}</span>
+                    <span class="font-mono text-xs ${chgColor} w-16 text-right">${chgIcon} ${Math.abs(chg).toFixed(2)}%</span>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+async function loadSources() {
+    const sources = await api('sources', { hours: currentHours });
+    const el = document.getElementById('sources-list');
+    el.innerHTML = sources.map(s => {
+        const icon = s.source === 'reddit' ? '🟠' : '📰';
+        return `
+            <div class="bg-bg-secondary rounded-lg p-3 text-center">
+                <div class="text-lg">${icon}</div>
+                <div class="text-sm font-semibold mt-1">${s.name}</div>
+                <div class="text-xs text-gray-400">${s.count} posts</div>
+            </div>`;
+    }).join('');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function formatNum(n) {
+    if (n >= 1e12) return (n/1e12).toFixed(2) + 'T';
+    if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+    if (n >= 1000) return n.toLocaleString(undefined, {maximumFractionDigits: 2});
+    if (n >= 1) return n.toFixed(2);
+    return n.toFixed(4);
+}
+
+function timeAgo(iso) {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    return `${Math.floor(diff/86400)}d ago`;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+async function refreshAll() {
+    currentHours = parseInt(document.getElementById('time-range').value);
+    await Promise.all([loadSentiment(), loadEntities(), loadNarratives(), loadAnomalies(), loadMarket(), loadSources()]);
+}
+
+document.getElementById('time-range').addEventListener('change', refreshAll);
+
+initCharts();
+refreshAll();
+// Auto-refresh every 5 minutes
+setInterval(refreshAll, 300000);
+</script>
+</body>
+</html>

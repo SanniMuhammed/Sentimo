@@ -1,7 +1,9 @@
-"""Named entity recognition for crypto assets, people, protocols."""
+"""Named entity recognition for crypto assets, people, protocols, regulators."""
 import re, os, sys
+from collections import defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# 80+ coins including DeFi protocols, L2s, DEXes
 COIN_MAP = {
     "bitcoin": "Bitcoin", "btc": "Bitcoin",
     "ethereum": "Ethereum", "eth": "Ethereum", "ether": "Ethereum",
@@ -12,10 +14,8 @@ COIN_MAP = {
     "polkadot": "Polkadot", "dot": "Polkadot",
     "avalanche": "Avalanche", "avax": "Avalanche",
     "chainlink": "Chainlink", "link": "Chainlink",
-    "polygon": "Polygon", "matic": "Polygon",
+    "polygon": "Polygon", "matic": "Polygon", "pol": "Polygon",
     "litecoin": "Litecoin", "ltc": "Litecoin",
-    "uniswap": "Uniswap", "uni": "Uniswap",
-    "aave": "Aave",
     "shiba": "Shiba Inu", "shib": "Shiba Inu",
     "pepe": "Pepe",
     "toncoin": "Toncoin", "ton": "Toncoin",
@@ -23,12 +23,49 @@ COIN_MAP = {
     "near": "NEAR", "near protocol": "NEAR",
     "cosmos": "Cosmos", "atom": "Cosmos",
     "aptos": "Aptos", "apt": "Aptos",
-    "arbitrum": "Arbitrum", "arb": "Arbitrum",
-    "optimism": "Optimism", "op": "Optimism",
     "sui": "Sui",
     "sei": "Sei",
     "render": "Render", "rndr": "Render",
     "injective": "Injective", "inj": "Injective",
+    "bonk": "Bonk",
+    "wif": "dogwifhat",
+    "floki": "Floki",
+    "kaspa": "Kaspa", "kas": "Kaspa",
+    "celestia": "Celestia", "tia": "Celestia",
+    "stacks": "Stacks", "stx": "Stacks",
+    "mantle": "Mantle", "mnt": "Mantle",
+    "immutable": "Immutable X", "imx": "Immutable X",
+    "fetch": "Fetch.ai", "fet": "Fetch.ai",
+    "filecoin": "Filecoin", "fil": "Filecoin",
+    "algorand": "Algorand", "algo": "Algorand",
+    "vechain": "VeChain", "vet": "VeChain",
+    "hedera": "Hedera", "hbar": "Hedera",
+    "fantom": "Fantom", "ftm": "Fantom",
+    "theta": "Theta", "theta network": "Theta",
+    "helium": "Helium", "hnt": "Helium",
+    "worldcoin": "Worldcoin", "wld": "Worldcoin",
+    "ondo": "Ondo", "ondo finance": "Ondo",
+    "pyth": "Pyth Network", "pyth network": "Pyth Network",
+    "jup": "Jupiter Token",
+    "pendle": "Pendle",
+    "ethena": "Ethena", "ena": "Ethena",
+    "eigen": "EigenLayer", "eigenlayer": "EigenLayer",
+    "blast": "Blast",
+    "zksync": "zkSync", "zk sync": "zkSync",
+    "starknet": "StarkNet", "strk": "StarkNet",
+    "manta": "Manta Network",
+    "bittensor": "Bittensor", "tao": "Bittensor",
+    "akash": "Akash", "akt": "Akash",
+    "arweave": "Arweave", "ar": "Arweave",
+    "bnb": "BNB", "binance coin": "BNB",
+    "usdt": "Tether", "tether": "Tether",
+    "usdc": "USD Coin",
+    "dai": "DAI",
+    "aave": "Aave",
+    "uniswap": "Uniswap", "uni": "Uniswap",
+    "maker": "Maker", "mkr": "Maker",
+    "lido": "Lido", "ldo": "Lido",
+    "rune": "THORChain", "thorchain": "THORChain",
 }
 
 PERSON_MAP = {
@@ -45,6 +82,14 @@ PERSON_MAP = {
     "cathie wood": "Cathie Wood",
     "jack dorsey": "Jack Dorsey",
     "satoshi": "Satoshi Nakamoto", "satoshi nakamoto": "Satoshi Nakamoto",
+    "paolo ardoino": "Paolo Ardoino",
+    "brad garlinghouse": "Brad Garlinghouse", "garlinghouse": "Brad Garlinghouse",
+    "sam altman": "Sam Altman",
+    "justin sun": "Justin Sun",
+    "richard heart": "Richard Heart",
+    "hayden adams": "Hayden Adams",
+    "anatoly yakovenko": "Anatoly Yakovenko", "anatoly": "Anatoly Yakovenko",
+    "raj gokal": "Raj Gokal",
 }
 
 PROTOCOL_MAP = {
@@ -54,13 +99,44 @@ PROTOCOL_MAP = {
     "base": "Base", "arbitrum": "Arbitrum", "optimism": "Optimism",
     "opensea": "OpenSea", "blur": "Blur",
     "pancakeswap": "PancakeSwap", "sushiswap": "SushiSwap",
+    "gmx": "GMX", "dydx": "dYdX",
+    "eigenlayer": "EigenLayer", "eigen": "EigenLayer",
+    "ethena": "Ethena", "pendle": "Pendle",
+    "morpho": "Morpho", "convex": "Convex",
+    "yearn": "Yearn", "balancer": "Balancer",
+    "1inch": "1inch", "paraswap": "ParaSwap",
+    "orca": "Orca", "marinade": "Marinade",
+    "jito": "Jito", "tensor": "Tensor",
+    "zksync": "zkSync", "starknet": "StarkNet",
+    "scroll": "Scroll", "linea": "Linea",
+    "blast": "Blast", "mode": "Mode",
+    "celestia": "Celestia", "manta": "Manta",
+    "layerzero": "LayerZero", "wormhole": "Wormhole",
+    "chainlink ccip": "Chainlink CCIP",
+    "pyth": "Pyth", "switchboard": "Switchboard",
 }
 
 EXCHANGE_MAP = {
     "binance": "Binance", "coinbase": "Coinbase", "kraken": "Kraken",
     "okx": "OKX", "bybit": "Bybit", "kucoin": "KuCoin",
     "bitfinex": "Bitfinex", "gemini": "Gemini", "robinhood": "Robinhood",
+    "crypto.com": "Crypto.com", "htx": "HTX", "bitget": "Bitget",
+    "mexc": "MEXC", "gate.io": "Gate.io",
 }
+
+# Regulatory bodies
+REGULATOR_MAP = {
+    "sec": "SEC", "securities and exchange commission": "SEC",
+    "cftc": "CFTC", "commodity futures trading commission": "CFTC",
+    "mica": "MiCA", "markets in crypto-assets": "MiCA",
+    "fed": "Federal Reserve", "federal reserve": "Federal Reserve",
+    "doj": "DOJ", "department of justice": "DOJ",
+    "finra": "FINRA",
+    "occ": "OCC",
+    "fsb": "FSB", "financial stability board": "FSB",
+    "fatf": "FATF",
+}
+
 
 def _build_pattern(mapping):
     keys = sorted(mapping.keys(), key=len, reverse=True)
@@ -71,6 +147,7 @@ _coin_re = _build_pattern(COIN_MAP)
 _person_re = _build_pattern(PERSON_MAP)
 _protocol_re = _build_pattern(PROTOCOL_MAP)
 _exchange_re = _build_pattern(EXCHANGE_MAP)
+_regulator_re = _build_pattern(REGULATOR_MAP)
 
 
 def extract(text: str) -> list:
@@ -86,4 +163,17 @@ def extract(text: str) -> list:
         results.add((PROTOCOL_MAP[m.group().lower()], "protocol"))
     for m in _exchange_re.finditer(text):
         results.add((EXCHANGE_MAP[m.group().lower()], "exchange"))
+    for m in _regulator_re.finditer(text):
+        results.add((REGULATOR_MAP[m.group().lower()], "regulator"))
     return list(results)
+
+
+def extract_cooccurrences(text: str) -> list:
+    """Return list of (entity1, entity2) co-occurrence pairs."""
+    entities = extract(text)
+    pairs = []
+    names = [e[0] for e in entities]
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            pairs.append(tuple(sorted([names[i], names[j]])))
+    return pairs

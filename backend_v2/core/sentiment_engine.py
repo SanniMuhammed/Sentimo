@@ -1,29 +1,44 @@
-import re
-
+from textblob import TextBlob
+from datetime import datetime
 
 class SentimentEngine:
-    def __init__(self):
-        self.positive_keywords = [
-            "bullish", "pump", "breakout", "accumulate",
-            "partnership", "approval", "growth", "surge",
-            "strong", "buy", "moon"
-        ]
+    def analyze_text(self, text: str) -> dict:
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity
 
-        self.negative_keywords = [
-            "fud", "scam", "hack", "collapse",
-            "withdrawal", "ban", "lawsuit", "dump",
-            "sell", "fear", "crash", "liquidation"
-        ]
+        if polarity > 0.1:
+            label = "BULLISH"
+        elif polarity < -0.1:
+            label = "BEARISH"
+        else:
+            label = "NEUTRAL"
 
-    def score(self, text: str) -> float:
-        text = text.lower()
+        return {
+            "text": text,
+            "label": label,
+            "polarity": round(polarity, 3),
+            "confidence": round(abs(polarity), 3),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
-        pos_count = sum(1 for word in self.positive_keywords if re.search(rf"\b{word}\b", text))
-        neg_count = sum(1 for word in self.negative_keywords if re.search(rf"\b{word}\b", text))
+    def aggregate_sentiment(self, texts: list) -> dict:
+        results = [self.analyze_text(t) for t in texts]
 
-        total = pos_count + neg_count
+        if not results:
+            return {"error": "No texts provided"}
 
-        if total == 0:
-            return 0.0
+        avg_score = sum(r["polarity"] for r in results) / len(results)
 
-        return (pos_count - neg_count) / total
+        if avg_score > 0.1:
+            overall = "BULLISH"
+        elif avg_score < -0.1:
+            overall = "BEARISH"
+        else:
+            overall = "NEUTRAL"
+
+        return {
+            "overall_sentiment": overall,
+            "average_score": round(avg_score, 3),
+            "total_samples": len(results),
+            "details": results
+        }
